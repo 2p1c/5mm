@@ -1,46 +1,59 @@
 %% 数据预处理：加载并重塑蛇形扫描数据
 % 加载原始数据
-load('data\5mm\100k\Scan_time.mat'); % 包含变量 x (1×2500) 和 y (961×2500)
+load('data\complete\155_3.mat'); % 包含变量 x (1×2500) 和 y (465×2500)
 
 % 计算采样率和时间向量
 data_time = x; % 时间向量
 fs = 1/(data_time(2)-data_time(1)); % 采样率 (Hz)
 
-% 设置点阵参数
-n_points = 31; % 31×31 点阵
-spacing = 1e-3; % 物理间距 1mm = 0.001m
-data_x = (0:n_points-1) * spacing; % x方向坐标 (m)
+% 设置点阵参数 - 矩形点阵
+n_cols = 155;      % x方向列数
+n_rows = 3;    % y方向行数
+spacing = 1e-4;  % 物理间距 0.1mm = 0.0001m
 
-% 将蛇形扫描数据重塑为 31×31×2500 的三维数组
-data_xyt = zeros(n_points, n_points, length(data_time));
+% 生成坐标向量
+data_x = (0:n_cols-1) * spacing; % x方向坐标 (m)
+data_y = (0:n_rows-1) * spacing; % y方向坐标 (m)
 
-for col = 1:n_points
+% 验证数据点数
+total_points = n_cols * n_rows;
+assert(size(y, 1) == total_points, ...
+    sprintf('数据点数不匹配: 期望 %d×%d=%d, 实际 %d', ...
+    n_cols, n_rows, total_points, size(y, 1)));
+
+% 将蛇形扫描数据重塑为 n_cols×n_rows×2500 的三维数组
+% 扫描方式: 先扫描y方向(列方向),再移动到下一列x方向
+data_xyt = zeros(n_cols, n_rows, length(data_time));
+
+for col = 1:n_cols
     % 计算当前列在y数组中的起始和结束索引
-    start_idx = (col-1) * n_points + 1;
-    end_idx = col * n_points;
+    start_idx = (col-1) * n_rows + 1;
+    end_idx = col * n_rows;
     
     % 提取当前列的数据
     col_data = y(start_idx:end_idx, :);
     
-    % 根据列数决定是否翻转（偶数列从下到上）
+    % 根据列数决定是否翻转（偶数列从下到上扫描）
     if mod(col, 2) == 0
         col_data = flipud(col_data); % 翻转偶数列
     end
     
-    % 存储到三维数组中
+    % 存储到三维数组中: data_xyt(x位置, y位置, 时间)
     data_xyt(col, :, :) = col_data;
 end
 
 fprintf('数据加载完成:\n');
-fprintf('  点阵大小: %d × %d\n', n_points, n_points);
+fprintf('  点阵大小: %d列 × %d行\n', n_cols, n_rows);
+fprintf('  物理尺寸: %.2f mm × %.2f mm\n', ...
+    (n_cols-1)*spacing*1e3, (n_rows-1)*spacing*1e3);
 fprintf('  时间点数: %d\n', length(data_time));
 fprintf('  采样率: %.2f MHz\n', fs/1e6);
 fprintf('  数据形状: %s\n', mat2str(size(data_xyt)));
 
 %% 随机选择一个点并分析其时域和频域特性
 % 随机选择点的坐标
-rand_x = randi(n_points);
-rand_y = randi(n_points);
+rand_x = randi(n_cols);
+rand_y = randi(n_rows);
 
 % 提取该点的时域信号
 point_signal = squeeze(data_xyt(rand_x, rand_y, :));
@@ -55,92 +68,245 @@ half_idx = 1:nfft/2;
 freq_vector_pos = freq_vector(half_idx);
 amplitude_spectrum = abs(freq_spectrum(half_idx));
 
-% 可视化
-figure('Name', '随机点信号分析', 'Position', [100, 100, 1200, 500]);
-
-% 时域信号
-subplot(1, 2, 1);
-plot(data_time * 1e6, point_signal, 'LineWidth', 1);
-xlabel('时间 (μs)');
-ylabel('幅值');
-title(sprintf('时域信号 - 位置: (%d, %d)', rand_x, rand_y));
-grid on;
-
-% 频域信号
-subplot(1, 2, 2);
-plot(freq_vector_pos / 1e6, amplitude_spectrum, 'LineWidth', 1);
-xlabel('频率 (MHz)');
-ylabel('幅值');
-title('频谱');
-grid on;
-xlim([0, fs/2/1e6]); % 显示到奈奎斯特频率
-
 fprintf('\n随机点分析:\n');
 fprintf('  选择的点: (%d, %d)\n', rand_x, rand_y);
-fprintf('  物理坐标: (%.2f mm, %.2f mm)\n', data_x(rand_x)*1e3, data_x(rand_y)*1e3);
+fprintf('  物理坐标: (%.2f mm, %.2f mm)\n', ...
+    data_x(rand_x)*1e3, data_y(rand_y)*1e3);
 fprintf('  信号RMS: %.4e\n', rms(point_signal));
 fprintf('  信号峰值: %.4e\n', max(abs(point_signal)));
 [~, max_freq_idx] = max(amplitude_spectrum);
 fprintf('  主频: %.2f MHz\n', freq_vector_pos(max_freq_idx)/1e6);
 
+%% 对随机点信号施加滤波并对比
+% 设置滤波参数
+center_freq = 4.4e5;    % 中心频率 440 kHz
+bandwidth = 7e5;      % 带宽 700 kHz
+filter_order = 4;     % 滤波器阶数
+
+% 显示滤波器信息
+fprintf('\n滤波处理:\n');
+Filter.printInfo(center_freq, bandwidth, filter_order, fs);
+
+% 应用带通滤波器
+filtered_signal = Filter.apply(point_signal, fs, center_freq, bandwidth, filter_order);
+
+% 计算滤波后的频谱
+filtered_spectrum = fft(filtered_signal, nfft);
+filtered_amplitude = abs(filtered_spectrum(half_idx));
+
+% 计算滤波效果指标
+original_energy = sum(point_signal.^2);
+filtered_energy = sum(filtered_signal.^2);
+energy_ratio = filtered_energy / original_energy * 100;
+
+fprintf('  滤波后信号能量保留: %.2f%%\n', energy_ratio);
+fprintf('  滤波后信号RMS: %.4e\n', rms(filtered_signal));
+fprintf('  滤波后信号峰值: %.4e\n', max(abs(filtered_signal)));
+
+% 可视化:滤波前后对比
+figure('Name', '滤波前后信号对比', 'Position', [100, 100, 1400, 800]);
+
+% 时域信号对比
+subplot(2, 2, 1);
+plot(data_time * 1e6, point_signal, 'b-', 'LineWidth', 1);
+xlabel('时间 (μs)', 'FontSize', 11);
+ylabel('幅值', 'FontSize', 11);
+title(sprintf('原始时域信号 - 位置: (%d, %d)', rand_x, rand_y), 'FontSize', 12);
+grid on;
+legend('原始信号', 'Location', 'best');
+
+subplot(2, 2, 2);
+plot(data_time * 1e6, filtered_signal, 'r-', 'LineWidth', 1);
+xlabel('时间 (μs)', 'FontSize', 11);
+ylabel('幅值', 'FontSize', 11);
+title('滤波后时域信号', 'FontSize', 12);
+grid on;
+legend('滤波信号', 'Location', 'best');
+
+% 频域信号对比
+subplot(2, 2, 3);
+plot(freq_vector_pos / 1e6, amplitude_spectrum, 'b-', 'LineWidth', 1);
+hold on;
+% 标注通带范围
+lowcut = (center_freq - bandwidth/2) / 1e6;
+highcut = (center_freq + bandwidth/2) / 1e6;
+xline(lowcut, 'g--', 'LineWidth', 1.5, 'Label', sprintf('%.2f MHz', lowcut));
+xline(highcut, 'g--', 'LineWidth', 1.5, 'Label', sprintf('%.2f MHz', highcut));
+hold off;
+xlabel('频率 (MHz)', 'FontSize', 11);
+ylabel('幅值', 'FontSize', 11);
+title('原始频谱', 'FontSize', 12);
+grid on;
+xlim([0, fs/6/1e6]);
+legend('原始频谱', 'Location', 'best');
+
+subplot(2, 2, 4);
+plot(freq_vector_pos / 1e6, filtered_amplitude, 'r-', 'LineWidth', 1);
+hold on;
+xline(lowcut, 'g--', 'LineWidth', 1.5, 'Label', sprintf('%.2f MHz', lowcut));
+xline(highcut, 'g--', 'LineWidth', 1.5, 'Label', sprintf('%.2f MHz', highcut));
+hold off;
+xlabel('频率 (MHz)', 'FontSize', 11);
+ylabel('幅值', 'FontSize', 11);
+title('滤波后频谱', 'FontSize', 12);
+grid on;
+xlim([0, fs/6/1e6]);
+legend('滤波频谱', 'Location', 'best');
+
+% 添加总标题
+sgtitle('随机点信号滤波前后对比分析', 'FontSize', 14, 'FontWeight', 'bold');
+
 %% 频散曲线计算（f-k域分析）
 
-% 1. 提取中间一行数据 (y=16) 进行空间-时间二维分析
-middle_row_index = 16;
-data_xt = permute(data_xyt(:, middle_row_index, :), [1, 3, 2]);  % [空间 × 时间]
+% 1. 提取中间一行数据进行空间-时间二维分析
+% 对于3列的点阵,选择中间列 (第2列)
+middle_col_index = 2;
+data_yt = permute(data_xyt(middle_col_index, :, :), [2, 3, 1]);  % [y空间 × 时间]
 
 fprintf('\n频散曲线计算:\n');
-fprintf('  使用第 %d 行数据\n', middle_row_index);
+fprintf('  使用第 %d 列数据 (x方向中间列)\n', middle_col_index);
+fprintf('  分析y方向的波传播特性\n');
 
-% 2. 设置FFT参数
-% 使用零填充提高分辨率（增加一倍）
-nfft_space = 2^(nextpow2(length(data_x)) + 1);      % 空间维度FFT点数
-nfft_time = 2^(nextpow2(length(data_time)) + 1);    % 时间维度FFT点数
+% 2. 对整列数据应用滤波
+fprintf('  对整列数据应用滤波...\n');
+data_yt_filtered = zeros(size(data_yt));
+for i = 1:n_rows
+    data_yt_filtered(i, :) = Filter.apply(data_yt(i, :), fs, center_freq, bandwidth, filter_order);
+end
+fprintf('  滤波完成\n');
+
+% 3. 设置FFT参数
+% 使用零填充提高分辨率
+nfft_space = 2^(nextpow2(n_rows) + 1);          % 空间维度FFT点数
+nfft_time = 2^(nextpow2(length(data_time)) + 1); % 时间维度FFT点数
 
 fprintf('  FFT点数: 空间=%d, 时间=%d\n', nfft_space, nfft_time);
 
-% 3. 二维傅里叶变换：空间-时间 → 波数-频率
-kf_spectrum = fftn(data_xt, [nfft_space, nfft_time]);
+% 4. 对原始数据和滤波数据分别进行二维傅里叶变换
+% 原始数据
+kf_spectrum_original = fftn(data_yt, [nfft_space, nfft_time]);
+kf_shifted_original = fftshift(kf_spectrum_original, 1);
 
-% 4. 对空间维度进行fftshift，使零波数居中
-kf_shifted = fftshift(kf_spectrum, 1);
+% 滤波数据
+kf_spectrum_filtered = fftn(data_yt_filtered, [nfft_space, nfft_time]);
+kf_shifted_filtered = fftshift(kf_spectrum_filtered, 1);
 
 % 5. 生成频率和波数向量
 % 频率向量 (Hz)
 freq_vector_full = (0:nfft_time-1) * fs / nfft_time;
 
-% 波数向量 (rad/m)
-delta_x = data_x(2) - data_x(1);  % 空间采样间隔
-kx_vector = ((-round(nfft_space/2) + 1 : round(nfft_space/2)) / nfft_space) ...
-            * 2*pi / delta_x;
+% 波数向量 (rad/m) - 沿y方向
+delta_y = data_y(2) - data_y(1);  % y方向空间采样间隔
+ky_vector = ((-round(nfft_space/2) + 1 : round(nfft_space/2)) / nfft_space) ...
+            * 2*pi / delta_y;
 
-% 6. 选择感兴趣的频率范围 (0 到 6 MHz)
+% 6. 选择感兴趣的频率范围 (0 到 2 MHz)
 max_freq = 2e6;  % 最大显示频率 (Hz)
 [~, freq_max_index] = min(abs(freq_vector_full - max_freq));
 
 % 截取数据
-data_kf = kf_shifted(:, 1:freq_max_index);
+data_kf_original = kf_shifted_original(:, 1:freq_max_index);
+data_kf_filtered = kf_shifted_filtered(:, 1:freq_max_index);
 freq_display = freq_vector_full(1:freq_max_index);
-kx_display = kx_vector;
-
-% 7. 去除负频率部分（仅保留正频率）
-data_kf(:, nfft_time/2+1:end) = 0;
+ky_display = ky_vector;
 
 fprintf('  显示频率范围: 0 - %.2f MHz\n', max_freq/1e6);
-fprintf('  波数范围: %.2f - %.2f rad/mm\n', min(kx_display)/1e3, max(kx_display)/1e3);
+fprintf('  波数范围: %.2f - %.2f rad/mm\n', min(ky_vector)/1e3, max(ky_vector)/1e3);
 
-% 8. 绘制频散曲线 (f-k谱图)
-figure('Name', '频散曲线 (f-k谱)', 'Position', [100, 100, 800, 600]);
-surf(freq_display, -kx_display, abs(data_kf));
+% 7. 对比度增强处理
+fprintf('\n对比度增强处理:\n');
+
+% 7.1 计算幅值谱
+amp_original = abs(data_kf_original);
+amp_filtered = abs(data_kf_filtered);
+
+% 7.2 归一化到 [0, 1] 范围 (直接使用线性幅值)
+% 使用百分位数裁剪,避免极值影响
+percentile_low = 1;      % 下限百分位 (更宽松,保留更多信息)
+percentile_high = 99.9;  % 上限百分位
+
+% 原始数据归一化
+amp_min_orig = prctile(amp_original(:), percentile_low);
+amp_max_orig = prctile(amp_original(:), percentile_high);
+amp_original_norm = (amp_original - amp_min_orig) / (amp_max_orig - amp_min_orig);
+amp_original_norm = max(0, min(1, amp_original_norm));  % 裁剪到[0,1]
+
+% 滤波数据归一化
+amp_min_filt = prctile(amp_filtered(:), percentile_low);
+amp_max_filt = prctile(amp_filtered(:), percentile_high);
+amp_filtered_norm = (amp_filtered - amp_min_filt) / (amp_max_filt - amp_min_filt);
+amp_filtered_norm = max(0, min(1, amp_filtered_norm));  % 裁剪到[0,1]
+
+fprintf('  应用归一化 (百分位裁剪: %.1f%% - %.1f%%)\n', percentile_low, percentile_high);
+
+% 7.3 伽马校正增强对比度
+gamma = 1;  % <1 增强暗部(弱信号)细节, 值越小对比度越强
+amp_original_enhanced = amp_original_norm .^ gamma;
+amp_filtered_enhanced = amp_filtered_norm .^ gamma;
+
+fprintf('  应用伽马校正 (gamma=%.2f)\n', gamma);
+fprintf('  对比度增强完成\n');
+
+% 7.4 波数幅值滤波 (滤除低幅值噪声)
+fprintf('\n波数幅值滤波:\n');
+
+% 设置阈值参数
+amplitude_threshold = 0.1;  % 幅值阈值 (相对于归一化后的最大值)
+                             % 低于此值的视为噪声,置零
+
+% 应用阈值滤波到增强后的数据
+amp_original_filtered = amp_original_enhanced;
+amp_original_filtered(amp_original_enhanced < amplitude_threshold) = 0;
+
+amp_filtered_filtered = amp_filtered_enhanced;
+amp_filtered_filtered(amp_filtered_enhanced < amplitude_threshold) = 0;
+
+% 统计滤除的点数
+total_points_orig = numel(amp_original_enhanced);
+filtered_points_orig = sum(amp_original_enhanced(:) < amplitude_threshold);
+filter_ratio_orig = filtered_points_orig / total_points_orig * 100;
+
+total_points_filt = numel(amp_filtered_enhanced);
+filtered_points_filt = sum(amp_filtered_enhanced(:) < amplitude_threshold);
+filter_ratio_filt = filtered_points_filt / total_points_filt * 100;
+
+fprintf('  幅值阈值: %.2f (归一化值)\n', amplitude_threshold);
+fprintf('  原始数据滤除: %d / %d 点 (%.2f%%)\n', ...
+    filtered_points_orig, total_points_orig, filter_ratio_orig);
+fprintf('  滤波数据滤除: %d / %d 点 (%.2f%%)\n', ...
+    filtered_points_filt, total_points_filt, filter_ratio_filt);
+fprintf('  波数幅值滤波完成\n');
+
+% 8. 绘制频散曲线对比 (滤波前后)
+figure('Name', '频散曲线对比 (对比度增强+幅值滤波)', 'Position', [100, 100, 1400, 600]);
+
+% 原始频散曲线 (增强+滤波后)
+subplot(1, 2, 1);
+surf(freq_display/1e3, -ky_vector/1e3, amp_original_filtered);
 shading interp;
+colormap(jet);  % 使用jet colormap，对比度更高
 colorbar;
 view([0, 90]);  % 俯视图
+xlabel('频率 (kHz)', 'FontSize', 12);
+ylabel('波数 (rad/mm)', 'FontSize', 12);
+title('原始频散曲线 (增强+滤波)', 'FontSize', 13, 'FontWeight', 'bold');
+grid on;
+caxis([0, 1]);  % 固定colorbar范围
 
-% 坐标轴标签
-xlabel('\fontname{宋体}\fontsize{20}频率\fontname{Times New Roman}\fontsize{20} / kHz');
-ylabel('\fontname{宋体}\fontsize{20}波数\fontname{Times New Roman}\fontsize{20} /  rad·mm^{-1}');
-title('频散曲线 (频率-波数谱)', 'FontSize', 16);
+% 滤波后频散曲线 (增强+滤波后)
+subplot(1, 2, 2);
+surf(freq_display/1e3, -ky_vector/1e3, amp_filtered_filtered);
+shading interp;
+colormap(jet);  % 使用jet colormap
+colorbar;
+view([0, 90]);  % 俯视图
+xlabel('频率 (kHz)', 'FontSize', 12);
+ylabel('波数 (rad/mm)', 'FontSize', 12);
+title(sprintf('滤波后频散曲线 (%.0f-%.0f kHz, 增强+滤波)', lowcut*1e3, highcut*1e3), ...
+      'FontSize', 13, 'FontWeight', 'bold');
+grid on;
+caxis([0, 1]);  % 固定colorbar范围
 
-% 可选：设置坐标轴范围
-% ylim([-4, 4]);
-% xlim([0, 2e6]);
+% 添加总标题
+sgtitle('频散曲线滤波前后对比 - 对比度增强 + 幅值滤波', ...
+        'FontSize', 15, 'FontWeight', 'bold');
