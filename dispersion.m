@@ -1,15 +1,15 @@
 %% 数据预处理：加载并重塑蛇形扫描数据
 % 加载原始数据
-load('data\complete\155_3.mat'); % 包含变量 x (1×2500) 和 y (465×2500)
+load("E:\数据\260108\debonding\data.mat"); % 包含变量 x (1×2500) 和 y (465×2500)
 
 % 计算采样率和时间向量
 data_time = x; % 时间向量
-fs = 1/(data_time(2)-data_time(1)); % 采样率 (Hz)
+fs = 6.25e6; % 采样率 (Hz)
 
 % 设置点阵参数 - 矩形点阵
-n_cols = 155;      % x方向列数
-n_rows = 3;    % y方向行数
-spacing = 1e-4;  % 物理间距 0.1mm = 0.0001m
+n_cols = 1;      % x方向列数
+n_rows = 27;    % y方向行数
+spacing = 5e-4;  % 物理间距 0.5mm = 0.0005m
 
 % 生成坐标向量
 data_x = (0:n_cols-1) * spacing; % x方向坐标 (m)
@@ -79,8 +79,8 @@ fprintf('  主频: %.2f MHz\n', freq_vector_pos(max_freq_idx)/1e6);
 
 %% 对随机点信号施加滤波并对比
 % 设置滤波参数
-center_freq = 4.4e5;    % 中心频率 440 kHz
-bandwidth = 7e5;      % 带宽 700 kHz
+center_freq = 4e5;    % 中心频率 400 kHz
+bandwidth = 6e5;      % 带宽 600 kHz
 filter_order = 4;     % 滤波器阶数
 
 % 显示滤波器信息
@@ -157,14 +157,18 @@ legend('滤波频谱', 'Location', 'best');
 sgtitle('随机点信号滤波前后对比分析', 'FontSize', 14, 'FontWeight', 'bold');
 
 %% 频散曲线计算（f-k域分析）
-
 % 1. 提取中间一行数据进行空间-时间二维分析
-% 对于3列的点阵,选择中间列 (第2列)
-middle_col_index = 2;
+% 根据实际列数选择合适的列
+if n_cols == 1
+    middle_col_index = 1;  % 只有1列时使用第1列
+else
+    middle_col_index = ceil(n_cols / 2);  % 多列时选择中间列
+end
+
 data_yt = permute(data_xyt(middle_col_index, :, :), [2, 3, 1]);  % [y空间 × 时间]
 
 fprintf('\n频散曲线计算:\n');
-fprintf('  使用第 %d 列数据 (x方向中间列)\n', middle_col_index);
+fprintf('  使用第 %d 列数据 (共 %d 列)\n', middle_col_index, n_cols);
 fprintf('  分析y方向的波传播特性\n');
 
 % 2. 对整列数据应用滤波
@@ -174,6 +178,19 @@ for i = 1:n_rows
     data_yt_filtered(i, :) = Filter.apply(data_yt(i, :), fs, center_freq, bandwidth, filter_order);
 end
 fprintf('  滤波完成\n');
+
+% 2.5 应用小波去噪
+wavelet_name = 'db4';      % Daubechies 4小波
+wavelet_level = 1;         % 分解层数
+threshold_method = 'soft'; % 软阈值
+
+fprintf('\n  应用小波去噪...\n');
+Filter.printWaveletInfo(wavelet_name, wavelet_level, threshold_method);
+
+for i = 1:n_rows
+    data_yt_filtered(i, :) = Filter.waveletDenoise(data_yt_filtered(i, :), wavelet_name, wavelet_level, threshold_method);
+end
+fprintf('  小波去噪完成\n');
 
 % 3. 设置FFT参数
 % 使用零填充提高分辨率
@@ -200,8 +217,8 @@ delta_y = data_y(2) - data_y(1);  % y方向空间采样间隔
 ky_vector = ((-round(nfft_space/2) + 1 : round(nfft_space/2)) / nfft_space) ...
             * 2*pi / delta_y;
 
-% 6. 选择感兴趣的频率范围 (0 到 2 MHz)
-max_freq = 2e6;  % 最大显示频率 (Hz)
+% 6. 选择感兴趣的频率范围 (0 到 1 MHz)
+max_freq = 1e6;  % 最大显示频率 (Hz)
 [~, freq_max_index] = min(abs(freq_vector_full - max_freq));
 
 % 截取数据
@@ -213,100 +230,38 @@ ky_display = ky_vector;
 fprintf('  显示频率范围: 0 - %.2f MHz\n', max_freq/1e6);
 fprintf('  波数范围: %.2f - %.2f rad/mm\n', min(ky_vector)/1e3, max(ky_vector)/1e3);
 
-% 7. 对比度增强处理
-fprintf('\n对比度增强处理:\n');
-
-% 7.1 计算幅值谱
+% 7. 计算幅值谱
 amp_original = abs(data_kf_original);
 amp_filtered = abs(data_kf_filtered);
 
-% 7.2 归一化到 [0, 1] 范围 (直接使用线性幅值)
-% 使用百分位数裁剪,避免极值影响
-percentile_low = 1;      % 下限百分位 (更宽松,保留更多信息)
-percentile_high = 99.9;  % 上限百分位
-
-% 原始数据归一化
-amp_min_orig = prctile(amp_original(:), percentile_low);
-amp_max_orig = prctile(amp_original(:), percentile_high);
-amp_original_norm = (amp_original - amp_min_orig) / (amp_max_orig - amp_min_orig);
-amp_original_norm = max(0, min(1, amp_original_norm));  % 裁剪到[0,1]
-
-% 滤波数据归一化
-amp_min_filt = prctile(amp_filtered(:), percentile_low);
-amp_max_filt = prctile(amp_filtered(:), percentile_high);
-amp_filtered_norm = (amp_filtered - amp_min_filt) / (amp_max_filt - amp_min_filt);
-amp_filtered_norm = max(0, min(1, amp_filtered_norm));  % 裁剪到[0,1]
-
-fprintf('  应用归一化 (百分位裁剪: %.1f%% - %.1f%%)\n', percentile_low, percentile_high);
-
-% 7.3 伽马校正增强对比度
-gamma = 1;  % <1 增强暗部(弱信号)细节, 值越小对比度越强
-amp_original_enhanced = amp_original_norm .^ gamma;
-amp_filtered_enhanced = amp_filtered_norm .^ gamma;
-
-fprintf('  应用伽马校正 (gamma=%.2f)\n', gamma);
-fprintf('  对比度增强完成\n');
-
-% 7.4 波数幅值滤波 (滤除低幅值噪声)
-fprintf('\n波数幅值滤波:\n');
-
-% 设置阈值参数
-amplitude_threshold = 0.1;  % 幅值阈值 (相对于归一化后的最大值)
-                             % 低于此值的视为噪声,置零
-
-% 应用阈值滤波到增强后的数据
-amp_original_filtered = amp_original_enhanced;
-amp_original_filtered(amp_original_enhanced < amplitude_threshold) = 0;
-
-amp_filtered_filtered = amp_filtered_enhanced;
-amp_filtered_filtered(amp_filtered_enhanced < amplitude_threshold) = 0;
-
-% 统计滤除的点数
-total_points_orig = numel(amp_original_enhanced);
-filtered_points_orig = sum(amp_original_enhanced(:) < amplitude_threshold);
-filter_ratio_orig = filtered_points_orig / total_points_orig * 100;
-
-total_points_filt = numel(amp_filtered_enhanced);
-filtered_points_filt = sum(amp_filtered_enhanced(:) < amplitude_threshold);
-filter_ratio_filt = filtered_points_filt / total_points_filt * 100;
-
-fprintf('  幅值阈值: %.2f (归一化值)\n', amplitude_threshold);
-fprintf('  原始数据滤除: %d / %d 点 (%.2f%%)\n', ...
-    filtered_points_orig, total_points_orig, filter_ratio_orig);
-fprintf('  滤波数据滤除: %d / %d 点 (%.2f%%)\n', ...
-    filtered_points_filt, total_points_filt, filter_ratio_filt);
-fprintf('  波数幅值滤波完成\n');
-
 % 8. 绘制频散曲线对比 (滤波前后)
-figure('Name', '频散曲线对比 (对比度增强+幅值滤波)', 'Position', [100, 100, 1400, 600]);
+figure('Name', '频散曲线对比', 'Position', [100, 100, 1400, 600]);
 
-% 原始频散曲线 (增强+滤波后)
+% 原始频散曲线
 subplot(1, 2, 1);
-surf(freq_display/1e3, -ky_vector/1e3, amp_original_filtered);
+surf(freq_display/1e3, -ky_vector/1e3, amp_original);
 shading interp;
-colormap(jet);  % 使用jet colormap，对比度更高
+colormap(jet);
 colorbar;
 view([0, 90]);  % 俯视图
 xlabel('频率 (kHz)', 'FontSize', 12);
 ylabel('波数 (rad/mm)', 'FontSize', 12);
-title('原始频散曲线 (增强+滤波)', 'FontSize', 13, 'FontWeight', 'bold');
+title('原始频散曲线', 'FontSize', 13, 'FontWeight', 'bold');
 grid on;
-caxis([0, 1]);  % 固定colorbar范围
 
-% 滤波后频散曲线 (增强+滤波后)
+% 滤波后频散曲线
 subplot(1, 2, 2);
-surf(freq_display/1e3, -ky_vector/1e3, amp_filtered_filtered);
+surf(freq_display/1e3, -ky_vector/1e3, amp_filtered);
 shading interp;
-colormap(jet);  % 使用jet colormap
+colormap(jet);
 colorbar;
 view([0, 90]);  % 俯视图
 xlabel('频率 (kHz)', 'FontSize', 12);
 ylabel('波数 (rad/mm)', 'FontSize', 12);
-title(sprintf('滤波后频散曲线 (%.0f-%.0f kHz, 增强+滤波)', lowcut*1e3, highcut*1e3), ...
+title(sprintf('滤波后频散曲线 (%.0f-%.0f kHz)', lowcut*1e3, highcut*1e3), ...
       'FontSize', 13, 'FontWeight', 'bold');
 grid on;
-caxis([0, 1]);  % 固定colorbar范围
 
 % 添加总标题
-sgtitle('频散曲线滤波前后对比 - 对比度增强 + 幅值滤波', ...
+sgtitle('频散曲线滤波前后对比', ...
         'FontSize', 15, 'FontWeight', 'bold');
