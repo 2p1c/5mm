@@ -1,6 +1,6 @@
 %% 数据预处理：加载并重塑蛇形扫描数据
 % 加载原始数据
-load("E:\数据\260108\debonding\data.mat"); % 包含变量 x (1×2500) 和 y (465×2500)
+load("/Volumes/ESD-ISO/数据/260108/complete/data21.mat"); % 包含变量 x (1×2500) 和 y (465×2500)
 
 % 计算采样率和时间向量
 data_time = x; % 时间向量
@@ -8,7 +8,7 @@ fs = 6.25e6; % 采样率 (Hz)
 
 % 设置点阵参数 - 矩形点阵
 n_cols = 1;      % x方向列数
-n_rows = 27;    % y方向行数
+n_rows = 21;    % y方向行数
 spacing = 5e-4;  % 物理间距 0.5mm = 0.0005m
 
 % 生成坐标向量
@@ -81,7 +81,7 @@ fprintf('  主频: %.2f MHz\n', freq_vector_pos(max_freq_idx)/1e6);
 % 设置滤波参数
 center_freq = 4e5;    % 中心频率 400 kHz
 bandwidth = 6e5;      % 带宽 600 kHz
-filter_order = 4;     % 滤波器阶数
+filter_order = 2;     % 滤波器阶数
 
 % 显示滤波器信息
 fprintf('\n滤波处理:\n');
@@ -234,6 +234,17 @@ fprintf('  波数范围: %.2f - %.2f rad/mm\n', min(ky_vector)/1e3, max(ky_vecto
 amp_original = abs(data_kf_original);
 amp_filtered = abs(data_kf_filtered);
 
+% 按频率逐列归一化
+% 矩阵结构为 A(k, f)，对每一个固定频率(列)，使用最大值归一化该频率下的所有波数幅值
+% 这有助于突出每个频率下的主要导波模态，忽略不同频率间的能量差异
+max_original = max(amp_original, [], 1);
+max_original(max_original == 0) = 1; % 防止除以零
+amp_original = amp_original ./ max_original;
+
+max_filtered = max(amp_filtered, [], 1);
+max_filtered(max_filtered == 0) = 1; % 防止除以零
+amp_filtered = amp_filtered ./ max_filtered;
+
 % 8. 绘制频散曲线对比 (滤波前后)
 figure('Name', '频散曲线对比', 'Position', [100, 100, 1400, 600]);
 
@@ -246,7 +257,7 @@ colorbar;
 view([0, 90]);  % 俯视图
 xlabel('频率 (kHz)', 'FontSize', 12);
 ylabel('波数 (rad/mm)', 'FontSize', 12);
-title('原始频散曲线', 'FontSize', 13, 'FontWeight', 'bold');
+title('原始频散曲线 (按频率归一化)', 'FontSize', 13, 'FontWeight', 'bold');
 grid on;
 
 % 滤波后频散曲线
@@ -258,7 +269,7 @@ colorbar;
 view([0, 90]);  % 俯视图
 xlabel('频率 (kHz)', 'FontSize', 12);
 ylabel('波数 (rad/mm)', 'FontSize', 12);
-title(sprintf('滤波后频散曲线 (%.0f-%.0f kHz)', lowcut*1e3, highcut*1e3), ...
+title(sprintf('滤波后频散曲线 (按频率归一化, %.0f-%.0f kHz)', lowcut*1e3, highcut*1e3), ...
       'FontSize', 13, 'FontWeight', 'bold');
 grid on;
 
