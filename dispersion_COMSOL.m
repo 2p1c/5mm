@@ -21,10 +21,10 @@ y_coords = data_points(:, 2);  % Y坐标 (mm)
 %% 2. 确定分析方向和数据组织
 % 分析X方向的波传播（一行数据）
 % 选择X方向17.5mm到22.5mm的11个点
-x_min = -22.5;  % mm
-x_max = -17.5;  % mm
-% x_min = 17.5;  % mm
-% x_max = 22.5;  % mm
+% x_min = -22.5;  % mm
+% x_max = -17.5;  % mm
+x_min = 17.5;  % mm
+x_max = 22.5;  % mm
 n_points_target = 11;
 
 fprintf('\n选择X方向 %.1f - %.1f mm 的 %d 个点\n', x_min, x_max, n_points_target);
@@ -95,7 +95,7 @@ fprintf('用于频散分析的数据: %d × %d\n', n_spatial_points, n_time_step
 
 %% 3. 计算采样参数
 dt = x(2) - x(1);  % 时间采样间隔 (s)
-fs = 6.25e6;  % 采样频率 (Hz)
+fs = 20e6;  % 采样频率 (Hz)
 dx = (spatial_coords(end) - spatial_coords(1)) / (n_spatial_points - 1);  % 空间采样间隔 (mm)
 dx_m = dx * 1e-3;  % 转换为米
 
@@ -177,7 +177,8 @@ fprintf('  小波去噪和高频补偿完成\n');
 fprintf('执行二维傅里叶变换...\n');
 
 % 使用零填充提高分辨率
-nfft_space = 2^(nextpow2(n_spatial_points) + 2);  % 空间维度FFT点数
+% 大幅增加空间维度的零填充以显著提高波数分辨率
+nfft_space = 2^(nextpow2(n_spatial_points) + 6);  % 空间维度FFT点数（大幅增加零填充）
 nfft_time = 2^(nextpow2(n_time_steps) + 2);       % 时间维度FFT点数
 
 fprintf('  FFT点数: 空间=%d, 时间=%d\n', nfft_space, nfft_time);
@@ -204,6 +205,34 @@ amplitude_positive = amplitude_spectrum(:, positive_freq_idx);
 
 fprintf('  频率范围: 0 - %.2f MHz\n', max(freq_positive)/1e6);
 fprintf('  波数范围: %.2f - %.2f rad/m\n', min(k_vector), max(k_vector));
+
+%% 6.5 频散曲线增强处理
+fprintf('\n频散曲线增强处理:\n');
+
+% 基础归一化：按频率逐列归一化
+amp_base = amplitude_positive;
+max_base = max(amp_base, [], 1);
+max_base(max_base == 0) = 1;
+amp_base = amp_base ./ max_base;
+fprintf('  基础方法: 按频率归一化\n');
+
+% 对数尺度 + 自适应阈值（组合方法）⭐推荐
+% 原理: 先用对数压缩，再用阈值去噪
+amp_temp = 20*log10(amplitude_positive + eps);
+amp_temp = amp_temp - min(amp_temp(:));
+amp_enhanced = zeros(size(amp_temp));
+threshold_factor_combined = 1.0;  % 组合方法的阈值因子
+for i = 1:size(amp_temp, 2)
+    col = amp_temp(:, i);
+    threshold = median(col) + threshold_factor_combined * std(col);
+    col(col < threshold) = 0;
+    amp_enhanced(:, i) = col;
+end
+% 归一化
+max_enhanced = max(amp_enhanced, [], 1);
+max_enhanced(max_enhanced == 0) = 1;
+amp_enhanced = amp_enhanced ./ max_enhanced;
+fprintf('  增强方法: 对数+阈值组合 (阈值因子=%.1f) ⭐\n', threshold_factor_combined);
 
 %% 7. 提取频散曲线
 fprintf('\n提取频散曲线...\n');
@@ -335,83 +364,74 @@ fprintf('  主要波群速度范围: %.0f - %.0f m/s\n', ...
 %% 9. 可视化结果
 fprintf('\n生成可视化图表...\n');
 
-% 图1: k-f域完整谱图
-figure('Name', '频散分析结果', 'Position', [50, 50, 1600, 900]);
+% 图1: 频散曲线增强方法对比
+figure('Name', '频散曲线对比', 'Position', [30, 30, 1400, 600]);
 
-subplot(2, 3, 1);
-pcolor(freq_positive/1e6, k_vector, amplitude_positive);
+% 基础归一化
+subplot(1, 2, 1);
+pcolor(freq_positive/1e6, k_vector, amp_base);
 shading interp;
 colormap(jet);
 colorbar;
 xlabel('频率 (MHz)', 'FontSize', 11);
 ylabel('波数 (rad/m)', 'FontSize', 11);
-title('k-f域频谱', 'FontSize', 12, 'FontWeight', 'bold');
+title('基础: 按频率归一化', 'FontSize', 12, 'FontWeight', 'bold');
+xlim([0, 1]);
+ylim([min(k_vector), max(k_vector)]);
+grid on;
+
+% 对数+阈值组合（增强）
+subplot(1, 2, 2);
+pcolor(freq_positive/1e6, k_vector, amp_enhanced);
+shading interp;
+colormap(jet);
+colorbar;
+xlabel('频率 (MHz)', 'FontSize', 11);
+ylabel('波数 (rad/m)', 'FontSize', 11);
+title('增强: 对数+阈值组合 ⭐', 'FontSize', 12, 'FontWeight', 'bold', 'Color', 'r');
+xlim([0, 1]);
+ylim([min(k_vector), max(k_vector)]);
+grid on;
+
+sgtitle('频散曲线对比 - COMSOL数据', 'FontSize', 14, 'FontWeight', 'bold');
+
+% 图2: 使用增强后的频谱进行频散分析
+figure('Name', '频散分析结果（增强版）', 'Position', [50, 50, 1600, 500]);
+
+subplot(1, 3, 1);
+pcolor(freq_positive/1e6, k_vector, amp_enhanced);  % 使用增强后的数据
+shading interp;
+colormap(jet);
+colorbar;
+xlabel('频率 (MHz)', 'FontSize', 11);
+ylabel('波数 (rad/m)', 'FontSize', 11);
+title('k-f域频谱（增强版）', 'FontSize', 12, 'FontWeight', 'bold');
 xlim([0, 1]);  % 0-1 MHz
 ylim([min(k_vector), max(k_vector)]);
 grid on;
 
-% 图2: 波数-频率频散曲线（点图）
-subplot(2, 3, 2);
+% 图2: 波数-频率频散曲线
+subplot(1, 3, 2);
 scatter(freq_valid/1e6, k_valid, 30, 'b', 'filled');
 xlabel('频率 (MHz)', 'FontSize', 11);
 ylabel('波数 (rad/m)', 'FontSize', 11);
-title('波数-频率频散曲线 (主要波)', 'FontSize', 12, 'FontWeight', 'bold');
+title('波数-频率频散曲线', 'FontSize', 12, 'FontWeight', 'bold');
 grid on;
 xlim([0, 1]);  % 0-1 MHz
 
-% 图3: 相速度-频率曲线（点图）
-subplot(2, 3, 3);
+% 图3: 相速度-频率曲线
+subplot(1, 3, 3);
 scatter(freq_valid/1e6, vp_valid, 30, 'r', 'filled');
 xlabel('频率 (MHz)', 'FontSize', 11);
 ylabel('相速度 (m/s)', 'FontSize', 11);
-title('相速度-频率曲线 (主要波)', 'FontSize', 12, 'FontWeight', 'bold');
+title('相速度-频率曲线', 'FontSize', 12, 'FontWeight', 'bold');
 grid on;
 xlim([0, 1]);  % 0-1 MHz
 
-% 图4: 群速度-频率曲线
-subplot(2, 3, 4);
-plot(freq_valid/1e6, vg_valid, 'g-', 'LineWidth', 2);
-xlabel('频率 (MHz)', 'FontSize', 11);
-ylabel('群速度 (m/s)', 'FontSize', 11);
-title('群速度-频率曲线 (主要波)', 'FontSize', 12, 'FontWeight', 'bold');
-grid on;
-xlim([0, 1]);  % 0-1 MHz
-
-% 图5: k-f域叠加主要波频散曲线
-subplot(2, 3, 5);
-pcolor(freq_positive/1e6, k_vector, amplitude_positive);
-shading interp;
-colormap(jet);
-hold on;
-if main_wave_is_forward
-    scatter(freq_valid/1e6, k_valid, 30, 'w', 'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1);
-else
-    scatter(freq_valid/1e6, -k_valid, 30, 'w', 'filled', 'MarkerEdgeColor', 'k', 'LineWidth', 1);
-end
-hold off;
-colorbar;
-xlabel('频率 (MHz)', 'FontSize', 11);
-ylabel('波数 (rad/m)', 'FontSize', 11);
-title('k-f域叠加主要波频散曲线', 'FontSize', 12, 'FontWeight', 'bold');
-xlim([0, 1]);  % 0-1 MHz
-ylim([min(k_vector), max(k_vector)]);
-grid on;
-legend('主要波频散曲线', 'Location', 'best');
-
-% 图6: 主要波相速度与群速度对比
-subplot(2, 3, 6);
-plot(freq_valid/1e6, vp_valid, 'r-', 'LineWidth', 2, 'DisplayName', '相速度');
-hold on;
-plot(freq_valid/1e6, vg_valid, 'g-', 'LineWidth', 2, 'DisplayName', '群速度');
-hold off;
-xlabel('频率 (MHz)', 'FontSize', 11);
-ylabel('速度 (m/s)', 'FontSize', 11);
-title('主要波相速度与群速度对比', 'FontSize', 12, 'FontWeight', 'bold');
-legend('Location', 'best');
-grid on;
-xlim([0, 1]);  % 0-1 MHz
-
-sgtitle('COMSOL超声数据频散曲线分析', 'FontSize', 15, 'FontWeight', 'bold');
+sgtitle('COMSOL超声数据频散曲线分析（增强版）', 'FontSize', 15, 'FontWeight', 'bold');
 
 fprintf('\n✓ 频散曲线分析完成！\n');
-fprintf('  所有结果已显示在图表中\n');
+fprintf('  已生成两个对比图表:\n');
+fprintf('    图1: 频散曲线对比（基础归一化 vs 对数+阈值组合）\n');
+fprintf('    图2: 频散分析结果（使用增强后的数据）\n');
+fprintf('  波数分辨率已提高（空间FFT零填充增加）\n');
