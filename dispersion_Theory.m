@@ -90,6 +90,29 @@ end
 k_roots_mm = k_roots / 1e3;
 f_roots_kHz = f_roots / 1e3;
 
+%% ==================== 计算界面位移幅值 ====================
+fprintf('正在计算界面 %d 处的位移幅值...\n', interface_index);
+interface_amps = zeros(size(k_roots));
+
+% 可以在此处开启并行计算
+% parfor i = 1:length(k_roots)
+for i = 1:length(k_roots)
+    interface_amps(i) = calculate_interface_amplitude(k_roots(i), f_roots(i), ...
+        n_layers, h_vec, rho_vec, cL_vec, cT_vec, interface_index);
+end
+
+% 归一化幅值 (0-1范围)
+if ~isempty(interface_amps)
+    max_amp = max(interface_amps);
+    if max_amp > 0
+        interface_amps_norm = interface_amps / max_amp;
+    else
+        interface_amps_norm = interface_amps;
+    end
+else
+    interface_amps_norm = [];
+end
+
 %% ==================== 提取指定界面的模态形状 ====================
 fprintf('\n正在提取界面 %d 处的模态形状...\n', interface_index);
 
@@ -113,18 +136,29 @@ figure('Name', 'Lamb波频散曲线', 'Position', [100, 100, 1000, 500]);
 
 subplot(1,2,1);
 hold on;
-colors = lines(n_modes_to_show);  % 不同模态用不同颜色
-for m = 1:n_modes_to_show
-    idx = (mode_labels == m);
-    plot(f_roots_kHz(idx), k_roots_mm(idx), '.', 'MarkerSize', 4, ...
-         'Color', colors(m,:), 'DisplayName', sprintf('模态 %d', m));
+% 原始绘图代码：
+% colors = lines(n_modes_to_show);  % 不同模态用不同颜色
+% for m = 1:n_modes_to_show
+%     idx = (mode_labels == m);
+%     plot(f_roots_kHz(idx), k_roots_mm(idx), '.', 'MarkerSize', 4, ...
+%          'Color', colors(m,:), 'DisplayName', sprintf('模态 %d', m));
+% end
+% legend('Location', 'northwest');
+
+% 新的绘图代码：使用scatter显示界面响应幅值
+if ~isempty(k_roots_mm)
+    scatter(f_roots_kHz, k_roots_mm, 15, interface_amps_norm, 'filled');
+    colormap(jet);
+    c = colorbar;
+    c.Label.String = sprintf('界面 %d 处垂直位移幅值 |u_z| (归一化)', interface_index);
+    c.Label.FontSize = 10;
 end
+
 xlabel('频率 (kHz)', 'FontSize', 12);
 ylabel('波数 k (rad/mm)', 'FontSize', 12);
-title('波数-频率频散曲线', 'FontSize', 14, 'FontWeight', 'bold');
+title(sprintf('波数-频率频散曲线 (颜色: 界面%d响应)', interface_index), 'FontSize', 14, 'FontWeight', 'bold');
 xlim([f_min, f_max]);
 ylim([k_min, k_max]);
-legend('Location', 'northwest');
 grid on;
 box on;
 
@@ -132,17 +166,28 @@ box on;
 subplot(1,2,2);
 hold on;
 cp_roots = 2*pi*f_roots ./ k_roots;  % 相速度 m/s
-for m = 1:n_modes_to_show
-    idx = (mode_labels == m);
-    plot(f_roots_kHz(idx), cp_roots(idx)/1e3, '.', 'MarkerSize', 4, ...
-         'Color', colors(m,:), 'DisplayName', sprintf('模态 %d', m));
+
+% 相速度图也使用幅值颜色
+if ~isempty(k_roots_mm)
+    scatter(f_roots_kHz, cp_roots/1e3, 15, interface_amps_norm, 'filled');
+    colormap(jet);
+    c = colorbar;
+    c.Label.String = '|u_z|';
 end
+
+% 原始相速度绘图代码:
+% for m = 1:n_modes_to_show
+%     idx = (mode_labels == m);
+%     plot(f_roots_kHz(idx), cp_roots(idx)/1e3, '.', 'MarkerSize', 4, ...
+%          'Color', colors(m,:), 'DisplayName', sprintf('模态 %d', m));
+% end
+% legend('Location', 'northeast');
+
 xlabel('频率 (kHz)', 'FontSize', 12);
 ylabel('相速度 c_p (km/s)', 'FontSize', 12);
 title('相速度-频率频散曲线', 'FontSize', 14, 'FontWeight', 'bold');
 xlim([f_min, f_max]);
 ylim([0, 15]);
-legend('Location', 'northeast');
 grid on;
 box on;
 
@@ -691,7 +736,7 @@ function [modes, n_modes] = track_modes(k_roots, f_roots, freq_vec)
     if n_modes > 1
         mode_avg_k = cellfun(@(m) mean(m.k), modes);
         mode_lengths = cellfun(@(m) length(m.k), modes);
-        
+
         % 对于长度接近的模态，按平均波数排序
         % 使用复合排序键: 长度(主要) + 平均波数(次要)
         max_len = max(mode_lengths);
@@ -699,4 +744,58 @@ function [modes, n_modes] = track_modes(k_roots, f_roots, freq_vec)
         [~, sort_idx] = sort(sort_key, 'descend');
         modes = modes(sort_idx);
     end
+end
+
+function uz_amp = calculate_interface_amplitude(k, f, n_layers, h_vec, rho_vec, cL_vec, cT_vec, interface_idx)
+    % CALCULATE_INTERFACE_AMPLITUDE 计算特定界面处的垂直位移幅值
+    %
+    % 输入:
+    %   k, f - 波数(rad/m)和频率(Hz)
+    %   n_layers, h_vec, ... - 层参数
+    %   interface_idx - 界面索引 (0=顶面, 1=第一层底面, ...)
+    %
+    % 输出:
+    %   uz_amp - 该位置的垂直位移幅值 (未归一化)
+
+    omega = 2 * pi * f;
+
+    % 1. 构建全局矩阵
+    G = build_global_matrix(k, omega, n_layers, h_vec, rho_vec, cL_vec, cT_vec);
+
+    % 2. 使用SVD求解零空间得到模态系数
+    [~, ~, V] = svd(G);
+    coeff_vec = V(:, end);
+
+    % 3. 确定目标界面的位置 (层索引和局部z坐标)
+    target_layer_idx = 0;
+    target_z_local = 0;
+
+    if interface_idx == 0
+        % 顶面 (第1层, z=0)
+        target_layer_idx = 1;
+        target_z_local = 0;
+    elseif interface_idx >= n_layers
+        % 底面 (最后一层, z=h)
+        target_layer_idx = n_layers;
+        target_z_local = h_vec(n_layers);
+    else
+        % 中间界面 (第i层底面 或 第i+1层顶面)
+        % 选择第i+1层顶面计算方便
+        target_layer_idx = interface_idx + 1;
+        target_z_local = 0;
+    end
+
+    % 4. 计算位移
+    % 提取该层的系数
+    coeff_n = coeff_vec((target_layer_idx-1)*4+1 : target_layer_idx*4);
+
+    % 计算该层该位置的矩阵
+    [D, ~] = layer_matrix(k, omega, target_z_local, rho_vec(target_layer_idx), ...
+                          cL_vec(target_layer_idx), cT_vec(target_layer_idx));
+
+    % 计算场量
+    field = D * coeff_n;
+
+    % 提取垂直位移幅值 |u_z|
+    uz_amp = abs(field(2));
 end
