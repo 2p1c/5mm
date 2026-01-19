@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: add interface-specific dispersion curve visualization\n\n- Implement calculate_interface_amplitude function to compute displacement amplitude at specific interfaces\n- Update visualization to color dispersion curves based on interface response \\(amplitude\\)\n- Add interface_index parameter to control which interface is analyzed\n\nThis allows users to simulate sensor data by highlighting modes that are active at the sensor location.\nEOF\n\\)\")",
+      "Skill(commit)"
+    ]
+  }
+}
