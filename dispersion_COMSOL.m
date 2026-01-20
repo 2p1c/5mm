@@ -21,10 +21,10 @@ y_coords = data_points(:, 2);  % Y坐标 (mm)
 %% 2. 确定分析方向和数据组织
 % 分析X方向的波传播（一行数据）
 % 选择X方向17.5mm到22.5mm的11个点
-% x_min = -22.5;  % mm
-% x_max = -17.5;  % mm
-x_min = 17.5;  % mm
-x_max = 22.5;  % mm
+x_min = -22.5;  % mm
+x_max = -17.5;  % mm
+% x_min = 17.5;  % mm
+% x_max = 22.5;  % mm
 n_points_target = 11;
 
 fprintf('\n选择X方向 %.1f - %.1f mm 的 %d 个点\n', x_min, x_max, n_points_target);
@@ -94,8 +94,10 @@ end
 fprintf('用于频散分析的数据: %d × %d\n', n_spatial_points, n_time_steps);
 
 %% 3. 计算采样参数
-dt = x(2) - x(1);  % 时间采样间隔 (s)
-fs = 20e6;  % 采样频率 (Hz)
+dt = x(501) - x(500);  % 时间采样间隔 (s)
+% fs = 10e6;  % 采样频率 (Hz)
+% fs = 6.25e6;  % 采样频率 (Hz)
+fs = 1/dt;  % 采样频率 (Hz)
 dx = (spatial_coords(end) - spatial_coords(1)) / (n_spatial_points - 1);  % 空间采样间隔 (mm)
 dx_m = dx * 1e-3;  % 转换为米
 

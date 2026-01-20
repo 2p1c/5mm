@@ -1,14 +1,14 @@
 %% 数据预处理：加载并重塑蛇形扫描数据
 % 加载原始数据
-load("C:\Users\123\Documents\Projects\5mm\data\complete\155_3.mat"); % 包含变量 x (1×2500) 和 y (465×2500)
+load("E:\数据\260108\debonding\data.mat"); % 包含变量 x (1×2500) 和 y (465×2500)
 
 % 计算采样率和时间向量
 data_time = x; % 时间向量
 fs = 6.25e6; % 采样率 (Hz)
 
 % 设置点阵参数 - 矩形点阵
-n_cols = 3;      % x方向列数
-n_rows = 155;    % y方向行数
+n_cols = 1;      % x方向列数
+n_rows = 27;    % y方向行数
 spacing = 5e-4;  % 物理间距 0.5mm = 0.0005m
 
 % 生成坐标向量

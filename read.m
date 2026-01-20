@@ -8,7 +8,7 @@ clear; close all; clc;
 
 %% 1. 读取文件
 fprintf('正在读取COMSOL数据文件...\n');
-filename = "C:\Users\123\Documents\Projects\COMSOL\5mm脱粘热防护板\5mm脱粘热防护板_点聚焦激光激励_R0结果\点源有缺陷.txt";
+filename = "C:\Users\123\Desktop\无损_铝板表面.txt";
 
 % 打开文件
 fid = fopen(filename, 'r');
