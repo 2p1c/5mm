@@ -5,14 +5,14 @@ clear; clc; close all;
 
 %% 数据预处理：加载并重塑蛇形扫描数据
 % 加载原始数据
-load('data\5mm\100k\Scan_time.mat'); % 包含变量 x (1×2500) 和 y (961×2500)
+load('E:\数据\260127\kongou200k2\51_51.mat'); % 包含变量 x (1×2500) 和 y (961×2500)
 
 % 计算采样率和时间向量
 data_time = x; % 时间向量
 fs = 1/(data_time(2)-data_time(1)); % 采样率 (Hz)
 
 % 设置点阵参数
-n_points = 31; % 31×31 点阵
+n_points = 51; % 31×31 点阵
 spacing = 1e-3; % 物理间距 1mm = 0.001m
 data_x = (0:n_points-1) * spacing; % x方向坐标 (m)
 data_y = (0:n_points-1) * spacing; % y方向坐标 (m)
